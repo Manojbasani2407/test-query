@@ -1,59 +1,44 @@
-SELECT 
-    breaks.*,
-    CASE 
-        WHEN COALESCE(TSR_FACT_LINKED_KEYS_UITI, '') LIKE '% %' 
-            THEN 'UITI linked to more than one UITI' 
-        WHEN COALESCE(TSR_FACT_LINKED_KEYS_UITI, '') IS NULL 
-            THEN 'NO UITI LINKED. Should not be submitted thru REGHUB' 
-        ELSE 'ONE to ONE UITI - UITI linkage' 
-    END AS UITI_LINKAGE_CATEG
-FROM (
+-- APP_REGHUB_FCA_VALU_FACT_ALL
+WITH RankedData AS (
     SELECT 
-        B.*, 
-        TS_FACT.ts_pty1,
-        TS_FACT.ts_pty2,
-        TS_FACT.keys_uti AS TSR_FACT_LINKED_KEYS_UITI,
-        TS_FACT.keys_src_sys AS ts_src_sys,
-        TS_FACT.alpha_trade_classfctn_ind AS alpha_trade_classfctn_ind
+        v.VALU_RPT_UTI,
+        v.VALU_KEYS_UITI,
+        v.VALU_SUBMITTED_VALU_TS,
+        v.VALU_state_status,
+        v.VALU_state_sub_status,
+        v.VALU_reason_codes,
+        v.VALU_trade_id,
+        v.rpt_trd_pty1_id AS valu_pty1,
+        v.rpt_trd_pty2_id AS valu_pty2,
+        vack.rpt_trd_pty1_id AS last_ack_valu_pty1,
+        vack.rpt_trd_pty2_id AS last_ack_valu_pty2,
+        vack.VALU_RPT_UTI AS last_ack_valu_trade_id,
+        vack.VALU_SUBMITTED_VALU_TS AS last_ack_valu_ts,
+        vack.VALU_SUBMITTED_VALU_TS_PREFEIT AS last_ack_valu_ts_prefeit,
+        ROW_NUMBER() OVER (PARTITION BY v.VALU_KEYS_UITI ORDER BY v.VALU_SUBMITTED_VALU_TS DESC) AS rn
     FROM 
-        GFOLYREG_WORK.APP_REGHUB_ESMA_BREAKS_CITI_SUBMISSION B
-    LEFT JOIN (
-        SELECT 
-            rpt_uti,
-            CONCAT_WS(' ', COLLECT_LIST(DISTINCT keys_uti)) AS keys_uti, 
-            CONCAT_WS(' ', COLLECT_LIST(DISTINCT keys_src_sys)) AS keys_src_sys, 
-            CONCAT_WS(' ', COLLECT_LIST(DISTINCT msghdr_trd_clsftn)) AS alpha_trade_classfctn_ind,
-            ts_pty1,
-            ts_pty2
-        FROM (
-            SELECT DISTINCT
-                LTRIM(
-                    CASE 
-                        WHEN INSTR(keys_uti, keys_uti_prefix) = 1 THEN keys_uti
-                        WHEN INSTR(keys_uti, amc_firm_lgl_enty_id) = 1 THEN keys_uti
-                        WHEN INSTR(keys_uti, amc_cpty_lgl_enty_id) = 1 THEN keys_uti
-                        ELSE CONCAT(keys_uti_prefix, '|', keys_uti) 
-                    END
-                ) AS rpt_uti,
-                a.keys_uti,
-                keys_src_sys,
-                msghdr_trd_clsftn,
-                CASE 
-                    WHEN keys_flow LIKE '%Citix%' THEN src_trd_pty1_id 
-                    ELSE src_trd_pty2_id 
-                END AS ts_pty1,
-                CASE 
-                    WHEN keys_flow LIKE '%Citix%' THEN src_trd_pty2_id 
-                    ELSE src_trd_pty1_id 
-                END AS ts_pty2
-            FROM 
-                GFOLYREG_MANAGED.ESMA_TS_FACT_DATA A
-            WHERE 
-                A.state_status IN ('ACK', 'REPORTED')
-        ) a 
-        GROUP BY rpt_uti, ts_pty1, ts_pty2
-    ) TS_FACT
-    ON B.UITI = TS_FACT.rpt_uti
-    AND B.reporting_counterparty_id = TS_FACT.ts_pty1
-    AND B.counterparty_2 = TS_FACT.ts_pty2
-) breaks;
+        GFOLYREG_WORK.APP_REGHUB_FCA_VALU_FACT V
+    LEFT JOIN 
+        GFOLYREG_WORK.APP_REGHUB_FCA_VALU_FACT_ACK VACK
+        ON V.VALU_KEYS_UITI = VACK.VALU_KEYS_UITI
+        AND V.VALU_trade_id = VACK.VALU_trade_id
+        AND V.rpt_trd_pty1_id = VACK.rpt_trd_pty1_id
+        AND V.rpt_trd_pty2_id = VACK.rpt_trd_pty2_id
+)
+SELECT 
+    VALU_RPT_UTI,
+    VALU_KEYS_UITI,
+    VALU_SUBMITTED_VALU_TS,
+    VALU_state_status,
+    VALU_state_sub_status,
+    VALU_reason_codes,
+    VALU_trade_id,
+    valu_pty1,
+    valu_pty2,
+    last_ack_valu_pty1,
+    last_ack_valu_pty2,
+    last_ack_valu_trade_id,
+    last_ack_valu_ts,
+    last_ack_valu_ts_prefeit
+FROM RankedData
+WHERE rn = 1;
